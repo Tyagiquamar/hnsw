@@ -220,6 +220,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 	// Every vector must share the dimensionality of the vectors already in
 	// the graph, or of the first vector decoded if it is empty.
 	dims := h.Dims()
+	dimsInitialized := h.Len() > 0
 
 	h.layers = make([]*layer[K], nLayers)
 	for i := 0; i < nLayers; i++ {
@@ -228,7 +229,7 @@ func (h *Graph[K]) Import(r io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if nNodes < 0 {
+		if nNodes <= 0 {
 			return fmt.Errorf("invalid number of nodes in layer %d: %d", i, nNodes)
 		}
 
@@ -244,10 +245,16 @@ func (h *Graph[K]) Import(r io.Reader) error {
 			if nNeighbors < 0 {
 				return fmt.Errorf("invalid neighbor count for node %v: %d", key, nNeighbors)
 			}
-			if dims == 0 {
+			if !dimsInitialized {
 				dims = len(vec)
+				dimsInitialized = true
 			} else if len(vec) != dims {
 				return fmt.Errorf("node %v has a %d-dimensional vector, expected %d dimensions", key, len(vec), dims)
+			}
+			if i > 0 {
+				if _, ok := h.layers[i-1].nodes[key]; !ok {
+					return fmt.Errorf("node %v in layer %d is not present in the preceding layer", key, i)
+				}
 			}
 
 			neighbors := make([]K, nNeighbors)

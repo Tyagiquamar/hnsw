@@ -3,6 +3,7 @@ package hnsw
 import (
 	"bytes"
 	"cmp"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -277,6 +278,12 @@ func TestGraph_ImportRejectsInvalidCounts(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]func(t *testing.T) *bytes.Buffer{
+		"negativeStringLength": func(t *testing.T) *bytes.Buffer {
+			return encodeTestPayload(t, encodingVersion, 16, 0.25, 20, -1)
+		},
+		"emptyLayer": func(t *testing.T) *bytes.Buffer {
+			return encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine", 1, 0)
+		},
 		"negativeLayers": func(t *testing.T) *bytes.Buffer {
 			return encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine", -1)
 		},
@@ -325,6 +332,60 @@ func TestGraph_ImportRejectsInvalidCounts(t *testing.T) {
 			err := g.Import(payload)
 			require.Error(t, err)
 		})
+	}
+}
+
+func TestGraph_ImportRejectsMissingLowerLayerNode(t *testing.T) {
+	t.Parallel()
+	for _, upperKey := range []int{1, 2} {
+		t.Run(fmt.Sprint(upperKey), func(t *testing.T) {
+			buf := encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine",
+				3, 1, 1, Vector{1}, 0, 1, 1, Vector{1}, 0, 1, upperKey, Vector{1}, 0)
+			g := NewGraph[int]()
+			err := g.Import(buf)
+			if upperKey == 1 {
+				require.NoError(t, err)
+				require.Equal(t, 1, g.Search(Vector{1}, 1)[0].Key)
+			} else {
+				require.ErrorContains(t, err, "preceding layer")
+			}
+		})
+	}
+}
+
+func TestGraph_ImportZeroDims(t *testing.T) {
+	t.Parallel()
+	t.Run("AgainstGraph", func(t *testing.T) {
+		g := NewGraph[int]()
+		g.Add(MakeNode(3, Vector{}))
+		buf := encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine",
+			1, 1, 1, Vector{1}, 0)
+		require.ErrorContains(t, g.Import(buf), "dimensions")
+	})
+	t.Run("EmptyGraph", func(t *testing.T) {
+		g := NewGraph[int]()
+		buf := encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine", 0)
+		require.NoError(t, g.Import(buf))
+		require.Zero(t, g.Dims())
+		require.Empty(t, g.Search(Vector{}, 1))
+	})
+	for _, populated := range []bool{false, true} {
+		for _, dims := range []int{0, 1} {
+			t.Run(fmt.Sprintf("populated=%t/dims=%d", populated, dims), func(t *testing.T) {
+				g := NewGraph[int]()
+				if populated {
+					g.Add(MakeNode(3, Vector{}))
+				}
+				buf := encodeTestPayload(t, encodingVersion, 16, 0.25, 20, "cosine",
+					1, 2, 1, Vector{}, 0, 2, make(Vector, dims), 0)
+				err := g.Import(buf)
+				if dims == 0 {
+					require.NoError(t, err)
+				} else {
+					require.ErrorContains(t, err, "dimensions")
+				}
+			})
+		}
 	}
 }
 
